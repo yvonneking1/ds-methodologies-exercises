@@ -20,33 +20,29 @@ def drop_columns(df):
 def rename_species_column_name(df):
     return df.rename(columns={"species_name": "species"})
 
-def encode_species(train, test):
-    encoder = sklearn.preprocessing.OneHotEncoder()
-    encoder.fit(train[['species']])
-    # nice columns for display
-    cols = ['species_' + c for c in encoder.categories_[0]]
-
-    m = encoder.transform(train[['species']]).todense()
-    train = pd.concat([
-        train,
-        pd.DataFrame(m, columns=cols, index=train.index)
-    ], axis=1).drop(columns='species')
-    
-    m = encoder.transform(test[['species']]).todense()
-    test = pd.concat([
-        test,
-        pd.DataFrame(m, columns=cols, index=test.index)
-    ], axis=1).drop(columns='species')
-
-    return train, test
+def label_encode(train, test):
+    le = sklearn.preprocessing.LabelEncoder()
+    train['species'] = le.fit_transform(train.species)
+    test['species'] = le.transform(test.species)
+    return le, train, test
 
 
 def prep_iris(df):
     df = drop_columns(df)
     df = rename_species_column_name(df)
     train, test = sklearn.model_selection.train_test_split(df, train_size=.8, random_state=123)
-    train, test = encode_species(train, test)
+    train, test = label_encode(train, test)
+    return le, train, test
+
+def inverse_encode(train, test, le):
+    train['species'] = le.inverse_transform(train.species)
+    test['species'] = le.inverse_transform(test.species)
     return train, test
+
+
+
+def drop_deck_column(df):
+    return df.drop(columns=["deck"])
 
 
 def impute_embark_town(train, test):
@@ -55,8 +51,11 @@ def impute_embark_town(train, test):
     return train, test
 
 
-def drop_deck_column(df):
-    return df.drop(columns=["deck"])
+def impute_age(train, test):
+    avg_age = train.age.mean()
+    train.age = train.age.fillna(avg_age)
+    test.age = test.age.fillna(avg_age)
+    return train, test
 
 
 def encode_embark_town(train, test):
@@ -77,10 +76,19 @@ def encode_embark_town(train, test):
         pd.DataFrame(m, columns=cols, index=test.index)
     ], axis=1).drop(columns='embark_town')
 
+    return encoder, train, test
+
+
+
+def impute_age(train, test):
+    imputer = sklearn.impute.SimpleImputer(strategy='mean')
+    imputer.fit(train[['age']])
+    train["age_imputed"] = imputer.transform(train[['age']])
+    test["age_imputed"] = imputer.transform(test[['age']])
     return train, test
 
 
-def scale_minmax_for_age_and_fare(train, test, column_list = ['age','fare']):
+def scale_minmax_for_age_and_fare(train, test, column_list = ['age_imputed','fare']):
     scaler = sklearn.preprocessing.MinMaxScaler()
     column_list_scaled = [col + '_scaled' for col in column_list]
     train_scaled = pd.DataFrame(scaler.fit_transform(train[column_list]), 
@@ -93,13 +101,14 @@ def scale_minmax_for_age_and_fare(train, test, column_list = ['age','fare']):
                                 index = test.index)
     test = test.join(test_scaled)
 
-    return train, test
+    return scaler, train, test
 
 
 def prep_titanic(df):
     df = drop_deck_column(df)
-    train, test = sklearn.model_selection.train_test_split(df, train_size=.8, random_state=123)
+    train, test = sklearn.model_selection.train_test_split(df, train_size=.75, random_state=123)
     train, test = impute_embark_town(train, test)
-    train, test = encode_embark_town(train, test)
-    train, test = scale_minmax_for_age_and_fare(train, test, column_list = ['age','fare'])
-    return train, test
+    train, test = impute_age(train, test)
+    encoder, train, test = encode_embark_town(train, test)
+    scaler, train, test = scale_minmax_for_age_and_fare(train, test, column_list = ['age_imputed','fare'])
+    return scaler, encoder, train, test
